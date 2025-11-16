@@ -1,0 +1,488 @@
+// Arborist - the branch manager for RootStock rshell branches and grafts.
+// by NitroCynic
+get_custom_object.in_script = true
+
+import_code("rootstock/gh-corelib/Modules.src")
+import_code("branch.src")
+import_code("rootstock/rootstock.src")
+
+Arborist = {}
+Arborist.version = "0.1.0"
+Arborist.branches = []
+Arborist.home_shell = null
+Arborist.branch_file = "/etc/arborist/.arborist_data"
+Arborist.home_folder = "/etc/arborist"
+
+tree = "
+                #&#
+              %&@&@&##
+       &%@% %&#%@|%%@&
+    &&%##%#@@&\@@&&@#       @=&#%##%
+   &#@@&%###%@;&@%#  %@    @% &@@&%#@%
+     @#%## #@& %%~|\\      @%@%##%##@@%
+                    \\         #@%%@@&%#@#
+                     \\        %#@%%@%#
+                      ||   _ //@%%@@
+                      ||  /___/             _                _     _
+                      || //      __        | |              (_)   | |
+                      |//       /  \   _ __| |__   ___  _ __ _ ___| |_
+                      ||       / /\ \ | '__| '_ \ / _ \| '__| / __| __|
+                      ||      / ____ \| |  | |_) | (_) | |  | \__ \ |_
+                      ||     /_/    \_\_|  |_.__/ \___/|_|  |_|___/\__|
+       .---.        ./||\.  The RShell branch Manager by NitroCynic v" + Arborist.version + "</pos>
+"
+logo = tree
+
+Arborist.init = function
+
+	print("<i>Initializing Arborist...</i>", 1)
+
+	Arborist.home_shell = get_shell
+
+	home_folder = Arborist.home_shell.host_computer.File(Arborist.home_folder)
+	if not home_folder then
+		print("Your system is not configured for Arborist.")
+		setup = user_input("Would you like to run setup? An Arborist config folder will be created in /etc/ (y/n): ")
+		if setup.lower == "y" then
+			if not Arborist.home_shell.host_computer.File("/etc/").has_permission("w") then
+				print("<#FF0000>Error: Arborist requires root access to run setup.</color>", 1)
+				exit("Exiting Arborist...")
+			end if
+			Arborist.run_setup
+		else
+			exit("Exiting Arborist...")
+		end if
+	end if
+
+	branch_file = Arborist.home_shell.host_computer.File(Arborist.branch_file)
+
+	if branch_file then
+		Arborist.load_branches(branch_file)
+	else
+		print("<#FF0000>Error: branch file not found.</color>")
+		return false
+	end if
+
+end function
+
+Arborist.run_setup = function // Run initial setup
+	print("<i>Initializing Arborist...</i>", 1)
+
+	home_folder = Arborist.home_shell.host_computer.create_folder("/etc/", "arborist")
+	if home_folder != 1 then
+		exit("<#FF0000>Error: Could not create Arborist home folder. Arborist will now exit.</color>")
+	end if
+
+	arborist_config = Arborist.home_shell.host_computer.touch(Arborist.home_folder, ".arborist_data")
+	if typeof(arborist_config) == "string" then
+		print(arborist_config)
+		exit("<#FF0000>Error: Could not create Arborist configuration file. Arborist will now exit.</color>")
+	end if
+
+	print("<i>Arborist home folder created at: </i>" + Arborist.home_folder)
+	print("<i>Arborist configuration file created at: </i>" + Arborist.home_folder + "/.arborist_data")
+
+	print("\nPlease add branches to the configuration file in the following format:")
+	print("<i>    <public_ip> <password></i>")
+	print("\nYou can add branches to the configuration file at any time.")
+	user_input("Press any key to continue...")
+
+	return
+
+end function
+
+Arborist.load_branches = function(branch_file)
+
+	branch_text = branch_file.get_content.split(char(10))
+
+	for line in branch_text
+		if line != "" then
+			branch_info = line.split(" ")
+
+			branch = new Branch
+
+			branch.public_ip = branch_info[0]
+			branch.password = branch_info[1]
+
+			Arborist.branches.push(branch)
+		end if
+	end for
+
+	for branch in Arborist.branches
+		print("Connecting to branch: " + branch.public_ip)
+		start_time = time()
+		branch.check_status
+		print("Connection time: " + (time() - start_time) + " seconds")
+	end for
+
+end function
+
+Arborist.menu = function
+
+	menu_str = "
+    [1] - Tree Summary      -  <i>View a summary the tree, branches, and grafts.</i>
+    [2] - Connect           -  <i>Connect to a branch or graft.</i>
+    [3] - Add Branch        -  <i>Add a branch to the tree.</i>
+    [4] - Add Grafts(s)     -  <i>Add grafts to a hub.</i>
+	[5] - Move Grafts       -  <i>Move grafts from one branch to another.</i>
+
+	[7] - Scan Logs
+	[8] - Clear Logs
+    [9] - Fetch Logs
+    [0] - Exit
+"
+	print(menu_str)
+	choice = user_input("Select an option: ")
+	return choice
+
+end function
+
+Arborist.handle_menu = function(choice)
+
+	if choice == "1" then
+		Arborist.summarize_tree
+	else if choice == "2" then
+		Arborist.connect
+	else if choice == "3" then
+		Arborist.add_branch
+	else if choice == "4" then
+		Arborist.add_grafts
+	else if choice == "5" then
+		Arborist.move_grafts
+	else if choice == "7" then
+		Arborist.scan_logs
+	else if choice == "8" then
+		Arborist.clear_logs
+	else if choice == "9" then
+		Arborist.fetch_logs
+	else if choice == "0" then
+		exit("Exiting Arborist...")
+	else Arborist.custom_commands(choice)
+	end if
+	return true
+
+end function
+
+Arborist.custom_commands = function(command)
+
+	if len(command.split(" ")) > 1 then
+		command = command.split(" ")[0]
+		args = command.split(" ")[1]
+	else
+		command = command.split(" ")[0]
+		args = ""
+	end if
+
+	print("Command: " + command + " Args: " + args)
+
+	if command == "prune" then
+		print("Pruning the tree...")
+		for branch in Arborist.branches
+			branch.prune_grafts
+		end for
+		print("Pruning complete.")
+		return true
+	end if
+
+end function
+
+Arborist.summarize_tree = function(prompt = "Press any key to continue...")
+
+	print("Tree Summary:\n", 1)
+
+	graft_count = 0
+	for branch in Arborist.branches
+		if branch.grafts then
+			graft_count += len(branch.grafts)
+		end if
+	end for
+
+	out_str = "Total Branch Count: " + len(Arborist.branches) + "\nTotal Graft Count: " + graft_count + "\n\n"
+	out_str += "<i>Remote_IP <pos=20%>Local_IP</pos> <pos=40%>Status</pos> <pos=50%>Grafts</pos></i>\n"
+	for branch in Arborist.branches
+		out_str = out_str + branch.summary + "\n"
+	end for
+
+	print(out_str)
+
+	return user_input(prompt)
+
+end function
+
+Arborist.summarize_grafts = function(branch, prompt = "Press any key to continue...")
+
+	grafts = branch.grafts
+
+	if len(grafts) == 0 then
+		print("No grafts found.")
+		return user_input(prompt)
+	end if
+
+	print("Grafts Summary: \n")
+	print("[" + branch.public_ip + "]")
+	for graft in grafts
+		if not typeof(graft) == "shell" then continue
+		print("    | ---- [" + graft.host_computer.public_ip + "]")
+	end for
+
+	return user_input(prompt)
+
+end function
+
+Arborist.clear_logs = function
+
+	print("Clearing all logs...")
+	sure = user_input("Are you sure you want to clear all logs? (y/n): ")
+	if sure.lower != "y" then return false
+
+	progress = 0
+
+	for branch in Arborist.branches
+		for graft in branch.grafts
+			log_file = graft.host_computer.File("/var/system.log")
+			if not log_file then continue
+		if log_file.size.to_int > 0 then
+			Modules.WipeLog(graft)
+			print("Cleared log for graft: " + graft.host_computer.public_ip + " [" + progress + "/" + len(branch.grafts) + "]")
+		end if
+			progress = progress + 1
+		end for
+		Modules.WipeLog(branch.shell)
+	end for
+
+end function
+
+Arborist.fetch_logs = function
+
+	print("Fetching logs...")
+	for branch in Arborist.branches
+		if not branch.shell then
+			print("Error: No shell available for branch: " + branch.public_ip)
+			continue
+		end if
+
+		Modules.FetchLog(branch.shell, Arborist.home_shell, "/home/guest/logs")
+
+		if branch.grafts then
+			for graft in branch.grafts
+				Modules.FetchLog(graft, Arborist.home_shell, "/home/guest/logs")
+			end for
+		end if
+	end for
+
+end function
+
+Arborist.add_branch = function
+
+	print("Not Implemented")
+
+	return false
+end function
+
+Arborist.add_grafts = function
+
+	print("Adding grafts to the tree...")
+
+	ip_group = []
+
+	choice = user_input("Enter source for IP list (file or manual):")
+	if choice.lower == "file" then
+		ip_file = user_input("Enter path to IP file: ")
+		if not Arborist.home_shell.host_computer.File(ip_file) then
+			print("Error: IP file not found.")
+			return false
+		else
+			ip_input = Arborist.home_shell.host_computer.File(ip_file).get_content
+			ip_group = ip_input.split(char(10))
+		end if
+	else if choice.lower == "manual" then
+		ip_input = user_input("Enter IP addresses (space separated): ")
+		ip_group = ip_input.split(" ")
+	else
+		print("Error: Invalid choice.")
+		return false
+	end if
+
+	check = user_input("Arborist will add " + len(ip_group) + " grafts to the tree. Continue? (y/n): ")
+
+	chosen_branch = null
+
+	while chosen_branch == null
+		ip_input = Arborist.summarize_tree("Enter a branch IP to connect to: ")
+		if ip_input == "" then return false
+
+		for branch in Arborist.branches
+			if branch.public_ip == ip_input then
+				chosen_branch = branch
+				break
+			end if
+		end for
+
+		if chosen_branch != null then break
+		print("Error: Invalid IP address selection")
+	end while
+
+	chosen_branch.add_grafts(ip_group)
+
+end function
+
+Arborist.scan_logs = function
+
+	grafts_of_interest = []
+
+	limit = user_input("Enter the maximum number of logs to retrieve (default: all): ")
+	if limit == "" then
+		limit = 99999
+	else
+		limit = limit.to_int
+	end if
+
+	for branch in Arborist.branches
+		modified_grafts = branch.check_logs
+		print("Checking logs for branch: " + branch.public_ip)
+		for graft in modified_grafts
+			if graft then
+				grafts_of_interest.push(graft)
+			end if
+			if len(grafts_of_interest) >= limit then
+				break
+			end if
+		end for
+	end for
+
+	print("The following grafts have logs of interest:")
+    for graft in grafts_of_interest
+        print("    Graft: " + graft.host_computer.public_ip)
+    end for
+
+    get_them = user_input("Would you like to get the logs? (y/n): ")
+    if get_them == "y" then
+        for graft in grafts_of_interest
+            result = Modules.FetchLog(graft, Arborist.home_shell, "/home/guest/logs")
+			if result == true then Modules.WipeLog(graft)
+        end for
+    end if
+
+end function
+
+Arborist.move_grafts = function
+
+	print("Moving grafts to a new branch...")
+
+	from_branch = null
+	to_branch = null
+	num_grafts = 0
+
+	while true
+		choice = Arborist.summarize_tree("Enter a branch IP to move grafts from: ")
+		if choice == "" then return false
+
+		for branch in Arborist.branches
+			if branch.public_ip == choice then
+				from_branch = branch
+				break
+			end if
+		end for
+
+		if from_branch != null then break
+		print("Error: Invalid IP address selection")
+	end while
+
+	while true
+		choice = Arborist.summarize_tree("Enter a branch IP to move grafts to: ")
+		if choice == "" then return false
+
+		for branch in Arborist.branches
+			if branch.public_ip == choice then
+				to_branch = branch
+				break
+			end if
+		end for
+
+		if from_branch == to_branch then
+			print("Error: Cannot move grafts to the same branch.")
+			continue
+		end if
+
+		if to_branch != null then break
+		print("Error: Invalid IP address selection")
+	end while
+
+	num_to_move = user_input("Enter the number of grafts to move: ")
+	if num_to_move == "" then return false
+	num_grafts = num_to_move.to_int
+
+	if num_grafts > len(from_branch.grafts) then
+		all = user_input("This will move all grafts. Continue? (y/n): ")
+		if all.lower == "y" then
+			num_grafts = len(from_branch.grafts)
+		else
+			print("Error: Invalid choice.")
+			return false
+		end if
+	end if
+
+	print("Moving " + num_grafts + " grafts from " + from_branch.public_ip + " to " + to_branch.public_ip)
+
+	from_branch.move_grafts(to_branch, num_grafts)
+
+end function
+
+Arborist.connect = function
+
+	chosen_branch = null
+
+	while chosen_branch == null
+		ip_input = Arborist.summarize_tree("Enter a branch IP to connect to: ")
+		if ip_input == "" then return false
+
+
+		for branch in Arborist.branches
+			if branch.public_ip == ip_input then
+				chosen_branch = branch
+				break
+				print("Connecting to branch: " + chosen_branch.public_ip)
+			end if
+		end for
+
+		if chosen_branch != null then break
+		print("Error: Invalid IP address selection")
+	end while
+
+	graft_shell = null
+
+	while graft_shell == null
+		chosen_graft = Arborist.summarize_grafts(chosen_branch, "Select a graft to connect to (0 to open a shell): ")
+		if chosen_graft == "" then return false
+		if chosen_graft == "0" then
+			graft_shell = chosen_branch.shell
+			break
+		end if
+
+		for graft in chosen_branch.grafts
+			if graft.host_computer.public_ip == chosen_graft then
+				graft_shell = graft
+				print("Connecting to graft: " + graft.host_computer.public_ip)
+				break
+			end if
+		end for
+
+	end while
+
+	graft_shell.start_terminal
+
+end function
+
+Arborist.init
+
+logo = logo + "\n    Branches connected: [" + len(Arborist.branches) + "]"
+
+print(logo, 1)
+
+while true
+	choice = Arborist.menu
+	if not Arborist.handle_menu(choice) then
+		break
+	end if
+	print(logo)
+end while

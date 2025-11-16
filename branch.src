@@ -1,0 +1,254 @@
+import_code("rootstock/scion/scion.src")
+
+// Branch object
+// This object represents a branch in the tree structure of Arborist
+Branch = {}
+
+// Basic setup
+Branch.public_ip = null
+Branch.local_ip = null
+Branch.status = "unknown"
+
+// Access to the shell
+Branch.user = "root"
+Branch.password = null
+Branch.shell = null
+
+// List of grafts (rshells) connected to this branch
+Branch.grafts = []
+
+Branch.check_status = function // Check the status of the branch
+
+	shell = get_shell
+
+	ping_result = shell.ping(self.public_ip)
+
+	if ping_result == 0 then
+		self.status = "unreachable"
+		return false
+	end if
+
+	branch_shell = shell.connect_service(
+		self.public_ip,
+		22,
+		self.user,
+		self.password)
+
+	if typeof(branch_shell) == "shell" then
+		self.status = "active"
+		self.shell = branch_shell
+		self.local_ip = self.shell.host_computer.local_ip
+	end if
+
+	if typeof(branch_shell) == "string" then
+		self.status = "unreachable"
+		return false
+	end if
+
+	graft_check = self.check_grafts
+
+	return true
+
+end function
+
+Branch.check_grafts = function // Check the status of the grafts
+
+	grafts = []
+
+	// Run the check_status binary that should be on each branch
+	if not self.shell then
+		self.check_status
+		if self.status != "active" then
+			print("Error: Branch could not be reached.")
+			return false
+		end if
+	end if
+
+	get_graft_binary = self.shell.host_computer.File("/bin/get_grafts")
+	if not get_graft_binary then
+		print("Error: get_grafts binary not found. Branch may need to be redeployed.")
+		return false
+	end if
+
+	get_custom_object.shells = []
+
+	self.shell.launch("/bin/get_grafts")
+	if len(get_custom_object.shells) == 0 then
+		print("Error: No grafts found.")
+		return false
+	end if
+
+	self.grafts = get_custom_object.shells
+
+	return true
+
+end function
+
+Branch.summary = function // Minimal summary of the branch
+
+	ip_str = "[" + self.public_ip + "]"
+	local_ip_str = "<pos=20%>[" + self.local_ip + "]</pos>"
+	status_str = ""
+	if self.status == "active" then
+		status_str = "<pos=40%><#00FF00>active</color></pos>"
+	else if self.status == "unreachable" then
+		status_str = "<#FF0000>unreachable</color>"
+	else if self.status == "unknown" then
+		status_str = "<#FFFF00>unknown</color>"
+	end if
+
+	grafts_str = "<pos=50%>[" + len(self.grafts) + "]</pos>"
+
+	out_str = join([
+		ip_str,
+		local_ip_str,
+		status_str,
+		grafts_str,
+	], char(9))
+
+	return out_str
+
+end function
+
+Branch.show_details = function // Show details of this branch
+
+	details_str = "
+    ------------------------------------
+    <b>Branch Details: " + self.public_ip + "</b>
+    ------------------------------------
+    Local IP: " + self.local_ip + "
+    Status: " + self.status + "
+    Connected Grafts [" + len(self.grafts) + "]:
+    "
+	print(details_str)
+
+	for graft in self.grafts
+		if graft then
+			print("    Graft: " + graft.host_computer.public_ip)
+		end if
+	end for
+
+end function
+
+Branch.get_terminal = function // Get a terminal for this branch
+
+	if not self.shell then
+		self.check_status
+		if self.status != "active" then
+			print("Error: Branch could not be reached.")
+			return false
+		end if
+	end if
+
+	self.shell.start_terminal
+
+	return true
+
+end function
+
+Branch.add_grafts = function(ip_group) // Add grafts to a branch
+
+	RootStock.ip_group = ip_group
+
+	RootStock.hub_shell = self.shell
+	RootStock.hub_ip = self.shell.host_computer.public_ip
+
+	RootStock.DeployGrafts
+	RootStock.CheckGrafts
+
+end function
+
+Branch.move_grafts = function(other_branch, num_grafts) // Move grafts to a new branch
+
+	grafts_to_move = self.grafts[ : num_grafts]
+
+	metax = Modules.FindALib("metaxploit.so")
+
+	get_custom_object.metax = include_lib(metax.path)
+	print(get_custom_object.metax)
+
+	for graft in grafts_to_move
+
+		procs = Modules.GetProcs(graft, "rootstock")
+
+		Scion.shell = graft
+		Scion.rshell_ip = other_branch.public_ip
+		Scion.rshell_port = 1222
+		Scion.graft
+
+		print("Killing old graft...")
+
+		for proc in procs
+            print("Killing graft process: " + proc.command + " PID: " + proc.pid)
+			graft.host_computer.close_program(proc.pid)
+		end for
+
+        print("Graft moved to " + other_branch.public_ip + " successfully.")
+
+	end for
+
+end function
+
+Branch.prune_grafts = function // Prune any grafts that have multiple connections
+
+    for graft in self.grafts
+        print("Pruning graft: " + graft.host_computer.public_ip)
+        while len(Modules.GetProcs(graft, "rootstock")) > 1
+            procs = Modules.GetProcs(graft, "rootstock")
+
+            print(graft.host_computer.close_program(procs[0].pid))
+        end while
+    end for
+
+end function
+
+Branch.check_logs = function // Check the state of the graft logs for this branch
+
+	grafts_of_interest = []
+
+	for graft in self.grafts
+		log_file = graft.host_computer.File("/var/system.log")
+		if not log_file then continue
+		if log_file.size.to_int > 0 then
+			grafts_of_interest.push(graft)
+		end if
+	end for
+
+	return grafts_of_interest
+
+end function
+
+Branch.search_grafts = function(search_term) // Search for grafts by IP address
+
+    grafts_of_interest = []
+
+    for graft in self.grafts
+        if graft.host_computer.public_ip.indexOf(search_term) != null then
+            grafts_of_interest.push(
+                "[" + self.public_ip + "] " +
+                "[" + graft.host_computer.public_ip + "] "
+            )
+        end if
+    end for
+
+    return grafts_of_interest
+
+end function
+
+
+if globals.hasIndex("IS_GREYBEL") then
+	test_branch = new Branch
+	test_branch.public_ip = "1.1.1.1"
+	test_branch.local_ip = "192.168.0.1"
+	test_branch.status = "active"
+	test_branch.user = "root"
+	test_branch.password = "password"
+	test_branch.shell = get_shell
+
+	test_branch.show_details
+	test_branch.check_status
+	test_branch.show_details
+
+end if
+
+
