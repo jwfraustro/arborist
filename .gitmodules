@@ -1,0 +1,4 @@
+[submodule "rootstock"]
+	path = rootstock
+	url = https://github.com/jwfraustro/rootstock
+	branch = main
