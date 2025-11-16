@@ -7,6 +7,7 @@
 ## Support Notice
 
 Arborist is provided **as-is**.
+
 I no longer actively play Grey Hack or maintain these projects, and I honestly don't know if this code will even run on the current version of Grey Hack.
 
 This project is released for educational use and as a historical reference for those interested in large-scale network automation in the Grey Hack environment.
@@ -125,10 +126,6 @@ When Arborist runs for the first time:
 * it checks for `/etc/arborist/`
 * if missing, it offers to create the directory and config file
 * if running without root, setup will fail (and Arborist will exit)
-
-## How Arborist Works
-
-### The Branch Database
 
 Arborist stores serialized branch objects in:
 
