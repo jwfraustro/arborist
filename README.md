@@ -1,6 +1,6 @@
 # Arborist
 
-**Arborist** is/was the branch-and-graft manager for large-scale rshell orchestration inside *Grey Hack* alongside **[Rootstock](https://github.com/jwfraustro/rootstock)** and **[Scion](https://github.com/jwfraustro/scion)**
+**Arborist** is/was a branch-and-graft manager for large-scale rshell orchestration inside *Grey Hack* alongside **[Rootstock](https://github.com/jwfraustro/rootstock)** and **[Scion](https://github.com/jwfraustro/scion)**
 
 ![arborist menu](images/menu.png)
 
